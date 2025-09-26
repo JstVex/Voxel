@@ -13,6 +13,23 @@ interface RotatingCubeProps {
     color?: string;
     rotationSpeed?: { x: number; y: number };
     scale?: number;
+    messages?: Message[];
+}
+
+// Message node component
+function MessageNode({ position, messageId }: {
+    position: [number, number, number];
+    messageId: string;
+}) {
+    return (
+        <mesh position={position}>
+            <sphereGeometry args={[0.06, 8, 8]} />
+            <meshStandardMaterial
+                color="#ffffff"
+                transparent={false}
+            />
+        </mesh>
+    );
 }
 
 // The rotating cube component
@@ -20,9 +37,29 @@ function RotatingCube({
     size = 2,
     color = "#ffffff",
     rotationSpeed = { x: 0.5, y: 0.3 },
-    scale = 1
+    scale = 1,
+    messages = []
 }: RotatingCubeProps) {
     const meshRef = useRef<THREE.Mesh>(null!);
+
+    // Generate random positions for message nodes inside the cube
+    const generateNodePosition = (index: number, cubeSize: number): [number, number, number] => {
+        // Use the message index as seed for consistent positioning
+        const seed = index * 12345;
+        const random = (offset: number) => {
+            const x = Math.sin(seed + offset) * 10000;
+            return (x - Math.floor(x)) * 2 - 1; // Range: -1 to 1
+        };
+
+        const margin = 0.3; // Keep nodes well inside the cube
+        const range = (cubeSize / 2) - margin;
+
+        return [
+            random(1) * range,
+            random(2) * range,
+            random(3) * range
+        ];
+    };
 
     // Animate the cube rotation and scale
     useFrame((state, delta) => {
@@ -40,20 +77,36 @@ function RotatingCube({
     });
 
     return (
-        <mesh ref={meshRef}>
-            <boxGeometry args={[size, size, size]} />
-            <meshStandardMaterial
-                color={color}
-                metalness={0}
-                roughness={0.1}
-                emissive="#222222"
-            />
-            {/* Add wireframe for gray borders */}
+        <group ref={meshRef}>
+            {/* Semi-transparent cube */}
+            <mesh>
+                <boxGeometry args={[size, size, size]} />
+                <meshStandardMaterial
+                    color={color}
+                    metalness={0}
+                    roughness={0.1}
+                    transparent
+                    opacity={0.3}
+                    emissive="#222222"
+                    emissiveIntensity={0.1}
+                />
+            </mesh>
+
+            {/* Wireframe edges - more prominent now */}
             <lineSegments>
                 <edgesGeometry args={[new THREE.BoxGeometry(size, size, size)]} />
-                <lineBasicMaterial color="#888888" />
+                <lineBasicMaterial color="#ffffff" opacity={0.6} transparent />
             </lineSegments>
-        </mesh>
+
+            {/* Message nodes */}
+            {messages.map((message, index) => (
+                <MessageNode
+                    key={message.id}
+                    position={generateNodePosition(index, size)}
+                    messageId={message.id}
+                />
+            ))}
+        </group>
     );
 }
 
@@ -82,6 +135,7 @@ export default function ThreeDCube({
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isSending, setIsSending] = useState(false);
+    const [isRefreshing, setIsRefreshing] = useState(false);
 
     // Initialize user and load messages
     useEffect(() => {
@@ -109,15 +163,32 @@ export default function ThreeDCube({
     useEffect(() => {
         if (!currentUser) return;
 
+        console.log('Setting up real-time subscription for user:', currentUser.session_nickname);
+
         const subscription = subscribeToMessages((newMessage) => {
-            setMessages(prev => [...prev, newMessage]);
+            console.log('Received new message via subscription:', newMessage);
+            setMessages(prev => {
+                // Check if message already exists to avoid duplicates
+                const exists = prev.some(msg => msg.id === newMessage.id);
+                if (exists) {
+                    console.log('Message already exists, skipping...');
+                    return prev;
+                }
+
+                console.log('Adding new message to state');
+                return [...prev, newMessage];
+            });
 
             // Animate cube for any new message (including from others)
             setCubeScale(1.3);
             setTimeout(() => setCubeScale(1), 400);
         });
 
+        // Test the subscription
+        console.log('Subscription created:', subscription);
+
         return () => {
+            console.log('Cleaning up subscription');
             unsubscribeFromMessages(subscription);
         };
     }, [currentUser]);
@@ -129,17 +200,32 @@ export default function ThreeDCube({
         setIsSending(true);
         try {
             // Send message to database
-            await sendMessage(inputText);
+            const sentMessage = await sendMessage(inputText);
+            console.log('Message sent successfully:', sentMessage);
 
             // Clear input
             setInputText('');
 
-            // Note: The message will appear via real-time subscription
+            // Note: The message should appear via real-time subscription
+            // If it doesn't, there might be a real-time setup issue
         } catch (error) {
             console.error('Failed to send message:', error);
             // Could add error notification here
         } finally {
             setIsSending(false);
+        }
+    };
+
+    const refreshMessages = async () => {
+        setIsRefreshing(true);
+        try {
+            const recentMessages = await getRecentMessages(20);
+            setMessages(recentMessages.reverse());
+            console.log('Messages refreshed manually');
+        } catch (error) {
+            console.error('Failed to refresh messages:', error);
+        } finally {
+            setIsRefreshing(false);
         }
     };
 
@@ -177,12 +263,13 @@ export default function ThreeDCube({
                 <directionalLight position={[-5, -5, -5]} intensity={0.3} />
                 <pointLight position={[10, 10, 10]} intensity={0.8} />
 
-                {/* The rotating cube */}
+                {/* The rotating cube with message nodes */}
                 <RotatingCube
                     size={cubeSize}
                     color={cubeColor}
                     rotationSpeed={rotationSpeed}
                     scale={cubeScale}
+                    messages={messages}
                 />
 
                 {/* Disabled user controls - cube stays centered */}
@@ -208,9 +295,23 @@ export default function ThreeDCube({
             {/* Messages display */}
             <div className="absolute top-8 right-8 bottom-32 w-80 max-w-sm">
                 <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 h-full flex flex-col">
-                    <h3 className="text-white font-semibold mb-4 text-center border-b border-white/20 pb-2">
-                        Live Messages
-                    </h3>
+                    <div className="flex justify-between items-center mb-4 border-b border-white/20 pb-2">
+                        <h3 className="text-white font-semibold">Live Messages</h3>
+                        <button
+                            onClick={refreshMessages}
+                            disabled={isRefreshing}
+                            className="text-white/60 hover:text-white transition-colors p-1"
+                            title="Refresh messages"
+                        >
+                            {isRefreshing ? (
+                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            ) : (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            )}
+                        </button>
+                    </div>
 
                     <div className="flex-1 overflow-y-auto space-y-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/20">
                         {messages.map((message) => (
