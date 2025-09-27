@@ -6,52 +6,83 @@ import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { sendMessage, getRecentMessages, subscribeToMessages, unsubscribeFromMessages, getCurrentUser } from '../../lib/messageService';
 import { Message, User } from '../../lib/supabase';
+import Nodes from './nodes';
 
-// Props interface for the rotating cube
-interface RotatingCubeProps {
+function TransitionOverlay({ isTransitioning, isEntering }: any) {
+    const [progress, setProgress] = useState(0);
+
+    useEffect(() => {
+        if (isTransitioning) {
+            setProgress(0);
+            const interval = setInterval(() => {
+                setProgress(prev => {
+                    if (prev >= 100) {
+                        clearInterval(interval);
+                        return 100;
+                    }
+                    return prev + 4;
+                });
+            }, 16);
+
+            return () => clearInterval(interval);
+        }
+    }, [isTransitioning]);
+
+    if (!isTransitioning) return null;
+
+    // Create zoom effect and fade to black
+    const scale = 1 + (progress / 100) * 3;
+    const opacity = Math.min(progress / 100, 0.9);
+
+    return (
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            <div
+                className="absolute inset-0 bg-gradient-radial from-transparent to-black/80"
+                style={{
+                    transform: `scale(${scale})`,
+                    opacity: opacity
+                }}
+            />
+
+            {progress > 50 && (
+                <div
+                    className="absolute inset-0 bg-black"
+                    style={{
+                        opacity: (progress - 70) / 30
+                    }}
+                />
+            )}
+        </div>
+    );
+}
+
+interface CubeProps {
     size?: number;
     color?: string;
     rotationSpeed?: { x: number; y: number };
     scale?: number;
     messages?: Message[];
+    onCubeClick?: () => void;
 }
 
-// Message node component
-function MessageNode({ position, messageId }: {
-    position: [number, number, number];
-    messageId: string;
-}) {
-    return (
-        <mesh position={position}>
-            <sphereGeometry args={[0.06, 8, 8]} />
-            <meshStandardMaterial
-                color="#ffffff"
-                transparent={false}
-            />
-        </mesh>
-    );
-}
-
-// The rotating cube component
-function RotatingCube({
+function Cube({
     size = 2,
     color = "#ffffff",
     rotationSpeed = { x: 0.5, y: 0.3 },
     scale = 1,
-    messages = []
-}: RotatingCubeProps) {
+    messages = [],
+    onCubeClick
+}: CubeProps) {
     const meshRef = useRef<THREE.Mesh>(null!);
 
-    // Generate random positions for message nodes inside the cube
     const generateNodePosition = (index: number, cubeSize: number): [number, number, number] => {
-        // Use the message index as seed for consistent positioning
         const seed = index * 12345;
         const random = (offset: number) => {
             const x = Math.sin(seed + offset) * 10000;
-            return (x - Math.floor(x)) * 2 - 1; // Range: -1 to 1
+            return (x - Math.floor(x)) * 2 - 1;
         };
 
-        const margin = 0.3; // Keep nodes well inside the cube
+        const margin = 0.3;
         const range = (cubeSize / 2) - margin;
 
         return [
@@ -61,14 +92,12 @@ function RotatingCube({
         ];
     };
 
-    // Animate the cube rotation and scale
     useFrame((state, delta) => {
         const mesh = meshRef.current;
         if (mesh) {
             mesh.rotation.x += delta * rotationSpeed.x;
             mesh.rotation.y += delta * rotationSpeed.y;
 
-            // Smooth scale animation
             const targetScale = scale;
             mesh.scale.x += (targetScale - mesh.scale.x) * delta * 8;
             mesh.scale.y += (targetScale - mesh.scale.y) * delta * 8;
@@ -78,8 +107,7 @@ function RotatingCube({
 
     return (
         <group ref={meshRef}>
-            {/* Semi-transparent cube */}
-            <mesh>
+            <mesh onClick={onCubeClick}>
                 <boxGeometry args={[size, size, size]} />
                 <meshStandardMaterial
                     color={color}
@@ -92,25 +120,25 @@ function RotatingCube({
                 />
             </mesh>
 
-            {/* Wireframe edges - more prominent now */}
+            {/* Wireframe edges */}
             <lineSegments>
                 <edgesGeometry args={[new THREE.BoxGeometry(size, size, size)]} />
                 <lineBasicMaterial color="#ffffff" opacity={0.6} transparent />
             </lineSegments>
 
-            {/* Message nodes */}
             {messages.map((message, index) => (
-                <MessageNode
+                <mesh
                     key={message.id}
                     position={generateNodePosition(index, size)}
-                    messageId={message.id}
-                />
+                >
+                    <sphereGeometry args={[0.06, 8, 8]} />
+                    <meshStandardMaterial color="#ffffff" />
+                </mesh>
             ))}
         </group>
     );
 }
 
-// Props interface for the main component
 interface ThreeDCubeProps {
     cubeSize?: number;
     cubeColor?: string;
@@ -120,7 +148,6 @@ interface ThreeDCubeProps {
     backgroundColor?: string;
 }
 
-// Main component
 export default function ThreeDCube({
     cubeSize = 2,
     cubeColor = "#ffffff",
@@ -136,18 +163,18 @@ export default function ThreeDCube({
     const [isLoading, setIsLoading] = useState(true);
     const [isSending, setIsSending] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [isInsideView, setIsInsideView] = useState(false);
+    const [isTransitioning, setIsTransitioning] = useState(false);
 
     // Initialize user and load messages
     useEffect(() => {
         const initializeApp = async () => {
             try {
-                // Get or create user
                 const user = await getCurrentUser();
                 setCurrentUser(user);
 
-                // Load recent messages
                 const recentMessages = await getRecentMessages(20);
-                setMessages(recentMessages.reverse()); // Reverse to show oldest first
+                setMessages(recentMessages.reverse());
 
                 setIsLoading(false);
             } catch (error) {
@@ -159,7 +186,7 @@ export default function ThreeDCube({
         initializeApp();
     }, []);
 
-    // Subscribe to real-time messages
+    // real-time messages
     useEffect(() => {
         if (!currentUser) return;
 
@@ -168,7 +195,6 @@ export default function ThreeDCube({
         const subscription = subscribeToMessages((newMessage) => {
             console.log('Received new message via subscription:', newMessage);
             setMessages(prev => {
-                // Check if message already exists to avoid duplicates
                 const exists = prev.some(msg => msg.id === newMessage.id);
                 if (exists) {
                     console.log('Message already exists, skipping...');
@@ -179,12 +205,10 @@ export default function ThreeDCube({
                 return [...prev, newMessage];
             });
 
-            // Animate cube for any new message (including from others)
-            setCubeScale(1.3);
+            setCubeScale(1.25);
             setTimeout(() => setCubeScale(1), 400);
         });
 
-        // Test the subscription
         console.log('Subscription created:', subscription);
 
         return () => {
@@ -193,24 +217,49 @@ export default function ThreeDCube({
         };
     }, [currentUser]);
 
+    const handleCubeClick = () => {
+        if (isTransitioning) return;
+
+        console.log('Cube clicked - starting simple transition');
+        setIsTransitioning(true);
+
+        // After transition animation completes, switch to inside view
+        setTimeout(() => {
+            setIsInsideView(true);
+            setIsTransitioning(false);
+            console.log('Transition completed - now inside view');
+        }, 1600);
+    };
+
+    const handleExitInsideView = () => {
+        if (isTransitioning) return;
+
+        console.log('Starting transition from inside view');
+        setIsTransitioning(true);
+        setIsInsideView(false);
+
+        setTimeout(() => {
+            setIsTransitioning(false);
+            console.log('Exit transition completed');
+        }, 1600);
+    };
+
+    const handleStartExitTransition = () => {
+        setIsTransitioning(true);
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!inputText.trim() || isSending) return;
 
         setIsSending(true);
         try {
-            // Send message to database
             const sentMessage = await sendMessage(inputText);
             console.log('Message sent successfully:', sentMessage);
 
-            // Clear input
             setInputText('');
-
-            // Note: The message should appear via real-time subscription
-            // If it doesn't, there might be a real-time setup issue
         } catch (error) {
             console.error('Failed to send message:', error);
-            // Could add error notification here
         } finally {
             setIsSending(false);
         }
@@ -248,6 +297,18 @@ export default function ThreeDCube({
         );
     }
 
+    if (isInsideView) {
+        return (
+            <Nodes
+                messages={messages}
+                currentUser={currentUser}
+                onExit={handleExitInsideView}
+                isTransitioning={isTransitioning}
+                onStartTransition={handleStartExitTransition}
+            />
+        );
+    }
+
     return (
         <div className={`w-full h-screen ${backgroundColor} relative`}>
             <Canvas
@@ -257,23 +318,21 @@ export default function ThreeDCube({
                 }}
                 className="w-full h-full"
             >
-                {/* Enhanced lighting for brighter white */}
                 <ambientLight intensity={0.8} />
                 <directionalLight position={[5, 5, 5]} intensity={1.2} />
                 <directionalLight position={[-5, -5, -5]} intensity={0.3} />
                 <pointLight position={[10, 10, 10]} intensity={0.8} />
 
-                {/* The rotating cube with message nodes */}
-                <RotatingCube
+                <Cube
                     size={cubeSize}
                     color={cubeColor}
                     rotationSpeed={rotationSpeed}
                     scale={cubeScale}
                     messages={messages}
+                    onCubeClick={handleCubeClick}
                 />
 
-                {/* Disabled user controls - cube stays centered */}
-                {showControls && (
+                {showControls && !isTransitioning && (
                     <OrbitControls
                         enableZoom={false}
                         enablePan={false}
@@ -283,17 +342,16 @@ export default function ThreeDCube({
                 )}
             </Canvas>
 
-            {/* User info overlay */}
             {showOverlay && currentUser && (
                 <div className="absolute top-8 left-8 text-white">
-                    <h1 className="text-4xl font-bold mb-2">Anonymous Cube</h1>
-                    <p className="text-lg opacity-80">You are: {currentUser.session_nickname}</p>
+                    <h1 className="text-4xl font-bold mb-2">The Base Cube</h1>
+                    <p className="text-lg opacity-80">Welcome back {currentUser.session_nickname}</p>
                     <p className="text-sm opacity-60">{messages.length} total messages</p>
                 </div>
             )}
 
-            {/* Messages display */}
-            <div className="absolute top-8 right-8 bottom-32 w-80 max-w-sm">
+            {/* Messages display - only show when outside */}
+            {/* <div className="absolute top-8 right-8 bottom-32 w-80 max-w-sm">
                 <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 h-full flex flex-col">
                     <div className="flex justify-between items-center mb-4 border-b border-white/20 pb-2">
                         <h3 className="text-white font-semibold">Live Messages</h3>
@@ -341,16 +399,22 @@ export default function ThreeDCube({
                         )}
                     </div>
                 </div>
-            </div>
+            </div> */}
 
-            {/* Input textbox at bottom */}
-            <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 w-full max-w-md px-4">
+            {isTransitioning && (
+                <TransitionOverlay
+                    isTransitioning={isTransitioning}
+                    isEntering={!isInsideView}
+                />
+            )}
+
+            <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 w-full max-w-md px-4">
                 <form onSubmit={handleSubmit} className="relative">
                     <input
                         type="text"
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
-                        placeholder={isSending ? "Sending..." : "Type a message and press Enter..."}
+                        placeholder={isSending ? "Sending..." : "Add a message"}
                         disabled={isSending}
                         className="w-full px-6 py-4 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full text-white placeholder-white/60 outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all disabled:opacity-50"
                     />
@@ -371,7 +435,7 @@ export default function ThreeDCube({
 
                 {/* Instructions */}
                 <p className="text-center text-white/60 text-sm mt-2">
-                    Send anonymous messages • Cube reacts to all messages
+                    Click the cube to explore nodes
                 </p>
             </div>
         </div>
