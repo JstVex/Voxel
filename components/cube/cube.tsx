@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { sendMessage, getRecentMessages, subscribeToMessages, unsubscribeFromMessages, getCurrentUser } from '../../lib/messageService';
 import { Message, User } from '../../lib/supabase';
 import Nodes from './nodes';
+import WelcomeScreen from '../welcomeScreen';
 
 function TransitionOverlay({ isTransitioning, isEntering }: any) {
     const [progress, setProgress] = useState(0);
@@ -54,6 +55,10 @@ function TransitionOverlay({ isTransitioning, isEntering }: any) {
             )}
         </div>
     );
+}
+
+function needsOnboarding(user: any): boolean {
+    return !user?.session_nickname || user.session_nickname.trim() === '';
 }
 
 interface CubeProps {
@@ -165,6 +170,7 @@ export default function ThreeDCube({
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [isInsideView, setIsInsideView] = useState(false);
     const [isTransitioning, setIsTransitioning] = useState(false);
+    const [showWelcome, setShowWelcome] = useState(false);
 
     // Initialize user and load messages
     useEffect(() => {
@@ -173,7 +179,13 @@ export default function ThreeDCube({
                 const user = await getCurrentUser();
                 setCurrentUser(user);
 
-                const recentMessages = await getRecentMessages(20);
+                if (needsOnboarding(user)) {
+                    setShowWelcome(true);
+                    setIsLoading(false);
+                    return;
+                }
+
+                const recentMessages = await getRecentMessages();
                 setMessages(recentMessages.reverse());
 
                 setIsLoading(false);
@@ -216,6 +228,28 @@ export default function ThreeDCube({
             unsubscribeFromMessages(subscription);
         };
     }, [currentUser]);
+
+    const handleWelcomeComplete = async () => {
+        setShowWelcome(false);
+        setIsLoading(true);
+
+        try {
+            const { clearCurrentUser, getCurrentUser: refreshUser } = await import('../../lib/userIdentity');
+            clearCurrentUser();
+
+            // Get the updated user data
+            const updatedUser = await refreshUser();
+            setCurrentUser(updatedUser);
+
+            // Load messages
+            const recentMessages = await getRecentMessages(100);
+            setMessages(recentMessages.reverse());
+        } catch (error) {
+            console.error('Failed to load messages after welcome:', error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const handleCubeClick = () => {
         if (isTransitioning) return;
@@ -288,6 +322,15 @@ export default function ThreeDCube({
     const isMyMessage = (message: Message) => {
         return currentUser && message.user_id === currentUser.id;
     };
+
+    if (showWelcome && currentUser) {
+        return (
+            <WelcomeScreen
+                currentUser={currentUser}
+                onComplete={handleWelcomeComplete}
+            />
+        );
+    }
 
     if (isLoading) {
         return (
@@ -416,7 +459,7 @@ export default function ThreeDCube({
                         onChange={(e) => setInputText(e.target.value)}
                         placeholder={isSending ? "Sending..." : "Add a message"}
                         disabled={isSending}
-                        className="w-full px-6 py-4 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full text-white placeholder-white/60 outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all disabled:opacity-50"
+                        className="w-full py-4 pl-6 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full text-white placeholder-white/60 outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all disabled:opacity-50"
                     />
                     <button
                         type="submit"

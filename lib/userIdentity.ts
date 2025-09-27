@@ -71,7 +71,7 @@ export async function getOrCreateUser(): Promise<User> {
         }
 
         if (existingUser) {
-            console.log('Found existing user:', existingUser.session_nickname);
+            console.log('Found existing user:', existingUser.session_nickname || 'No nickname set');
             // Update last seen
             await supabase
                 .from('users')
@@ -99,7 +99,7 @@ export async function getOrCreateUser(): Promise<User> {
         }
 
         if (backupUser) {
-            console.log('Found backup user:', backupUser.session_nickname);
+            console.log('Found backup user:', backupUser.session_nickname || 'No nickname set');
             // Update fingerprint hash (might have changed)
             const { data: updatedUser } = await supabase
                 .from('users')
@@ -114,14 +114,14 @@ export async function getOrCreateUser(): Promise<User> {
             return updatedUser!;
         }
 
-        // Create new user
+        // Create new user WITHOUT a nickname - they'll set it in the welcome screen
         const newUser = {
             fingerprint_hash: fingerprint,
             backup_identifiers: { localStorage: localStorageId },
-            session_nickname: generateRandomNickname()
+            session_nickname: null // No auto-generated nickname
         };
 
-        console.log('Creating new user:', newUser.session_nickname);
+        console.log('Creating new user without nickname');
 
         const { data: createdUser, error } = await supabase
             .from('users')
@@ -139,25 +139,13 @@ export async function getOrCreateUser(): Promise<User> {
             throw new Error(`Failed to create user: ${error.message}`);
         }
 
-        console.log('Successfully created user:', createdUser.session_nickname);
+        console.log('Successfully created user without nickname');
         return createdUser!;
 
     } catch (error) {
         console.error('Full error in getOrCreateUser:', error);
         throw error;
     }
-}
-
-// Generate a random nickname for new users
-function generateRandomNickname(): string {
-    const adjectives = ['Cool', 'Swift', 'Bright', 'Silent', 'Cosmic', 'Digital', 'Neon', 'Mystic'];
-    const nouns = ['Cube', 'Explorer', 'Wanderer', 'Dreamer', 'Seeker', 'Visitor', 'Ghost', 'Spirit'];
-
-    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-    const noun = nouns[Math.floor(Math.random() * nouns.length)];
-    const num = Math.floor(Math.random() * 999);
-
-    return `${adj}${noun}${num}`;
 }
 
 // Store current user in memory for the session
