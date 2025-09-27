@@ -76,16 +76,21 @@ function easeInOutCubic(t: number): number {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-// Connection line component between parent and reply
-function ConnectionLine({ start, end }: { start: [number, number, number]; end: [number, number, number] }) {
+interface ConnectionLineProps {
+    start: [number, number, number];
+    end: [number, number, number];
+}
+
+function ConnectionLine({ start, end }: ConnectionLineProps) {
     const points = [
         new THREE.Vector3(...start),
-        new THREE.Vector3(...end)
+        new THREE.Vector3(...end),
     ];
 
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
 
     return (
+        // @ts-ignore
         <line geometry={geometry}>
             <lineBasicMaterial color="#60a5fa" opacity={0.6} transparent />
         </line>
