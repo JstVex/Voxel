@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// Replace with your Supabase project URL and anon key
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
     console.error('Missing Supabase environment variables:');
@@ -29,6 +30,8 @@ export interface Message {
     content: string;
     created_at: string;
     is_deleted: boolean;
+    parent_message_id?: string | null;
+    reply_count: number;
     users?: {
         session_nickname?: string;
         fingerprint_hash: string;

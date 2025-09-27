@@ -4,16 +4,23 @@ import { getCurrentUser } from './userIdentity';
 // Re-export getCurrentUser for convenience
 export { getCurrentUser } from './userIdentity';
 
-// Send a new message
-export async function sendMessage(content: string): Promise<Message> {
+// Send a new message or reply
+export async function sendMessage(content: string, parentMessageId?: string): Promise<Message> {
     const user = await getCurrentUser();
+
+    const messageData: any = {
+        user_id: user.id,
+        content: content.trim()
+    };
+
+    // Add parent message ID if this is a reply
+    if (parentMessageId) {
+        messageData.parent_message_id = parentMessageId;
+    }
 
     const { data: message, error } = await supabase
         .from('messages')
-        .insert({
-            user_id: user.id,
-            content: content.trim()
-        })
+        .insert(messageData)
         .select(`
       *,
       users (
@@ -79,20 +86,47 @@ export async function getUserMessages(): Promise<Message[]> {
     return messages || [];
 }
 
+// Get replies for a specific message
+export async function getMessageReplies(messageId: string): Promise<Message[]> {
+    const { data: replies, error } = await supabase
+        .from('messages')
+        .select(`
+      *,
+      users (
+        session_nickname,
+        fingerprint_hash
+      )
+    `)
+        .eq('parent_message_id', messageId)
+        .eq('is_deleted', false)
+        .order('created_at', { ascending: true });
+
+    if (error) {
+        throw new Error(`Failed to fetch replies: ${error.message}`);
+    }
+
+    return replies || [];
+}
+
 // Real-time message subscription
 export function subscribeToMessages(callback: (message: Message) => void) {
+    console.log('Creating message subscription...');
+
     const subscription = supabase
-        .channel('messages')
+        .channel('public:messages')
         .on(
             'postgres_changes',
             {
                 event: 'INSERT',
                 schema: 'public',
-                table: 'messages'
+                table: 'messages',
+                filter: 'is_deleted=eq.false'
             },
             async (payload) => {
+                console.log('Real-time payload received:', payload);
+
                 // Fetch the complete message with user data
-                const { data: message } = await supabase
+                const { data: message, error } = await supabase
                     .from('messages')
                     .select(`
             *,
@@ -104,12 +138,20 @@ export function subscribeToMessages(callback: (message: Message) => void) {
                     .eq('id', payload.new.id)
                     .single();
 
+                if (error) {
+                    console.error('Error fetching complete message:', error);
+                    return;
+                }
+
                 if (message) {
+                    console.log('Broadcasting complete message:', message);
                     callback(message);
                 }
             }
         )
-        .subscribe();
+        .subscribe((status) => {
+            console.log('Subscription status:', status);
+        });
 
     return subscription;
 }
