@@ -5,7 +5,8 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { sendMessage, getRecentMessages, subscribeToMessages, unsubscribeFromMessages, getCurrentUser } from '../../lib/messageService';
-import { Message, User } from '../../lib/supabase';
+import { getAllCubes } from '../../lib/cubeService';
+import { Message, User, TheCube } from '../../lib/supabase';
 import Nodes from './nodes';
 import WelcomeScreen from '../welcomeScreen';
 
@@ -53,6 +54,94 @@ function TransitionOverlay({ isTransitioning, isEntering }: any) {
                     }}
                 />
             )}
+        </div>
+    );
+}
+
+// Cube Navigation Component
+function CubeNavigation({
+    cubes,
+    currentCubeIndex,
+    onCubeChange,
+    isTransitioning = false
+}: {
+    cubes: TheCube[];
+    currentCubeIndex: number;
+    onCubeChange: (cubeIndex: number) => void;
+    isTransitioning?: boolean;
+}) {
+    const canGoLeft = currentCubeIndex > 0;
+    const canGoRight = currentCubeIndex < cubes.length - 1;
+    const currentCube = cubes[currentCubeIndex];
+
+    const handleLeftClick = () => {
+        if (canGoLeft && !isTransitioning) {
+            onCubeChange(currentCubeIndex - 1);
+        }
+    };
+
+    const handleRightClick = () => {
+        if (canGoRight && !isTransitioning) {
+            onCubeChange(currentCubeIndex + 1);
+        }
+    };
+
+    return (
+        <div className="absolute top-1/2 left-0 right-0 transform -translate-y-1/2 pointer-events-none z-10">
+            <div className="flex justify-between items-center px-8">
+                {/* Left Arrow */}
+                <button
+                    onClick={handleLeftClick}
+                    disabled={!canGoLeft || isTransitioning}
+                    className={`pointer-events-auto bg-white/10 hover:bg-white/20 disabled:bg-white/5 disabled:cursor-not-allowed text-white p-4 rounded-full transition-all backdrop-blur-sm border border-white/20 ${canGoLeft && !isTransitioning ? 'opacity-80 hover:opacity-100' : 'opacity-30'
+                        }`}
+                    title={canGoLeft ? `Go to ${cubes[currentCubeIndex - 1]?.name}` : 'No previous cube'}
+                >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                </button>
+
+                {/* Current Cube Info */}
+                {/* <div className="pointer-events-auto bg-black/50 backdrop-blur-sm rounded-full px-6 py-3 border border-white/20">
+                    <div className="flex items-center space-x-3">
+                        <div
+                            className="w-4 h-4 rounded-full border border-white/30"
+                            style={{ backgroundColor: currentCube?.color }}
+                        />
+
+                        <span className="text-white font-medium text-sm">
+                            {currentCube?.name}
+                        </span>
+
+                        <span className="text-white/50 text-xs">
+                            {currentCubeIndex + 1} / {cubes.length}
+                        </span>
+                    </div>
+                </div> */}
+
+                {/* Right Arrow */}
+                <button
+                    onClick={handleRightClick}
+                    disabled={!canGoRight || isTransitioning}
+                    className={`pointer-events-auto bg-white/10 hover:bg-white/20 disabled:bg-white/5 disabled:cursor-not-allowed text-white p-4 rounded-full transition-all backdrop-blur-sm border border-white/20 ${canGoRight && !isTransitioning ? 'opacity-80 hover:opacity-100' : 'opacity-30'
+                        }`}
+                    title={canGoRight ? `Go to ${cubes[currentCubeIndex + 1]?.name}` : 'No next cube'}
+                >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                </button>
+            </div>
+
+            {/* Keyboard Hints */}
+            {/* <div className="flex justify-center mt-6">
+                <div className="pointer-events-auto bg-black/30 backdrop-blur-sm rounded-full px-4 py-2 border border-white/10">
+                    <p className="text-white/60 text-xs text-center">
+                        Use ← → arrow keys or click arrows to switch cubes
+                    </p>
+                </div>
+            </div> */}
         </div>
     );
 }
@@ -172,7 +261,13 @@ export default function ThreeDCube({
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [showWelcome, setShowWelcome] = useState(false);
 
-    // Initialize user and load messages
+    // Multi-cube state
+    const [cubes, setCubes] = useState<TheCube[]>([]);
+    const [currentCubeIndex, setCurrentCubeIndex] = useState(0);
+    const [currentCube, setCurrentCube] = useState<TheCube | null>(null);
+    const [isCubeSwitching, setIsCubeSwitching] = useState(false);
+
+    // Initialize user and load cubes/messages
     useEffect(() => {
         const initializeApp = async () => {
             try {
@@ -185,8 +280,20 @@ export default function ThreeDCube({
                     return;
                 }
 
-                const recentMessages = await getRecentMessages();
-                setMessages(recentMessages.reverse());
+                // Load all cubes
+                const allCubes = await getAllCubes();
+                setCubes(allCubes);
+
+                if (allCubes.length > 0) {
+                    setCurrentCube(allCubes[0]);
+                    // Load messages for the first cube
+                    const recentMessages = await getRecentMessages(100, allCubes[0].id);
+                    setMessages(recentMessages.reverse());
+                } else {
+                    // Fallback: load all messages if no cubes found
+                    const recentMessages = await getRecentMessages(100);
+                    setMessages(recentMessages.reverse());
+                }
 
                 setIsLoading(false);
             } catch (error) {
@@ -198,14 +305,59 @@ export default function ThreeDCube({
         initializeApp();
     }, []);
 
-    // real-time messages
+    // Handle cube switching
+    const handleCubeChange = async (newCubeIndex: number) => {
+        if (isCubeSwitching || newCubeIndex === currentCubeIndex) return;
+
+        setIsCubeSwitching(true);
+        setIsTransitioning(true);
+
+        try {
+            // Switch to new cube
+            const newCube = cubes[newCubeIndex];
+            setCurrentCube(newCube);
+            setCurrentCubeIndex(newCubeIndex);
+
+            // Load messages for the new cube
+            const cubeMessages = await getRecentMessages(100, newCube.id);
+            setMessages(cubeMessages.reverse());
+
+            console.log(`Switched to ${newCube.name} with ${cubeMessages.length} messages`);
+        } catch (error) {
+            console.error('Failed to switch cube:', error);
+        } finally {
+            setTimeout(() => {
+                setIsCubeSwitching(false);
+                setIsTransitioning(false);
+            }, 800);
+        }
+    };
+
+    // Keyboard navigation
     useEffect(() => {
-        if (!currentUser) return;
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (isInsideView || isCubeSwitching || showWelcome) return;
+
+            if (event.key === 'ArrowLeft' && currentCubeIndex > 0) {
+                handleCubeChange(currentCubeIndex - 1);
+            } else if (event.key === 'ArrowRight' && currentCubeIndex < cubes.length - 1) {
+                handleCubeChange(currentCubeIndex + 1);
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [currentCubeIndex, cubes.length, isInsideView, isCubeSwitching, showWelcome]);
+
+    // Real-time messages for current cube
+    useEffect(() => {
+        if (!currentUser || showWelcome) return;
 
         console.log('Setting up real-time subscription for user:', currentUser.session_nickname);
+        console.log('Current cube ID:', currentCube?.id);
 
         const subscription = subscribeToMessages((newMessage) => {
-            console.log('Received new message via subscription:', newMessage);
+
             setMessages(prev => {
                 const exists = prev.some(msg => msg.id === newMessage.id);
                 if (exists) {
@@ -213,7 +365,7 @@ export default function ThreeDCube({
                     return prev;
                 }
 
-                console.log('Adding new message to state');
+                console.log('✅ Adding new message to state');
                 return [...prev, newMessage];
             });
 
@@ -227,7 +379,7 @@ export default function ThreeDCube({
             console.log('Cleaning up subscription');
             unsubscribeFromMessages(subscription);
         };
-    }, [currentUser]);
+    }, [currentUser, showWelcome]);
 
     const handleWelcomeComplete = async () => {
         setShowWelcome(false);
@@ -241,9 +393,18 @@ export default function ThreeDCube({
             const updatedUser = await refreshUser();
             setCurrentUser(updatedUser);
 
-            // Load messages
-            const recentMessages = await getRecentMessages(100);
-            setMessages(recentMessages.reverse());
+            // Load cubes and messages
+            const allCubes = await getAllCubes();
+            setCubes(allCubes);
+
+            if (allCubes.length > 0) {
+                setCurrentCube(allCubes[0]);
+                const recentMessages = await getRecentMessages(100, allCubes[0].id);
+                setMessages(recentMessages.reverse());
+            } else {
+                const recentMessages = await getRecentMessages(100);
+                setMessages(recentMessages.reverse());
+            }
         } catch (error) {
             console.error('Failed to load messages after welcome:', error);
         } finally {
@@ -252,12 +413,11 @@ export default function ThreeDCube({
     };
 
     const handleCubeClick = () => {
-        if (isTransitioning) return;
+        if (isTransitioning || isCubeSwitching) return;
 
         console.log('Cube clicked - starting simple transition');
         setIsTransitioning(true);
 
-        // After transition animation completes, switch to inside view
         setTimeout(() => {
             setIsInsideView(true);
             setIsTransitioning(false);
@@ -288,7 +448,7 @@ export default function ThreeDCube({
 
         setIsSending(true);
         try {
-            const sentMessage = await sendMessage(inputText);
+            const sentMessage = await sendMessage(inputText, undefined, currentCube?.id);
             console.log('Message sent successfully:', sentMessage);
 
             setInputText('');
@@ -302,7 +462,7 @@ export default function ThreeDCube({
     const refreshMessages = async () => {
         setIsRefreshing(true);
         try {
-            const recentMessages = await getRecentMessages(20);
+            const recentMessages = await getRecentMessages(100, currentCube?.id);
             setMessages(recentMessages.reverse());
             console.log('Messages refreshed manually');
         } catch (error) {
@@ -352,6 +512,10 @@ export default function ThreeDCube({
         );
     }
 
+    // Get current cube color or fallback to prop
+    const displayColor = currentCube?.color || cubeColor;
+    const displayName = currentCube?.name || "The Base Cube";
+
     return (
         <div className={`w-full h-screen ${backgroundColor} relative`}>
             <Canvas
@@ -368,14 +532,14 @@ export default function ThreeDCube({
 
                 <Cube
                     size={cubeSize}
-                    color={cubeColor}
+                    color={displayColor}
                     rotationSpeed={rotationSpeed}
                     scale={cubeScale}
                     messages={messages}
                     onCubeClick={handleCubeClick}
                 />
 
-                {showControls && !isTransitioning && (
+                {showControls && !isTransitioning && !isCubeSwitching && (
                     <OrbitControls
                         enableZoom={false}
                         enablePan={false}
@@ -385,64 +549,39 @@ export default function ThreeDCube({
                 )}
             </Canvas>
 
-            {showOverlay && currentUser && (
-                <div className="absolute top-8 left-8 text-white">
-                    <h1 className="text-4xl font-bold mb-2">The Base Cube</h1>
-                    <p className="text-lg opacity-80">Welcome back {currentUser.session_nickname}</p>
-                    <p className="text-sm opacity-60">{messages.length} total messages</p>
-                </div>
+            {/* Cube Navigation - only show if we have multiple cubes */}
+            {!isInsideView && cubes.length > 1 && (
+                <CubeNavigation
+                    cubes={cubes}
+                    currentCubeIndex={currentCubeIndex}
+                    onCubeChange={handleCubeChange}
+                    isTransitioning={isTransitioning || isCubeSwitching}
+                />
             )}
 
-            {/* Messages display - only show when outside */}
-            {/* <div className="absolute top-8 right-8 bottom-32 w-80 max-w-sm">
-                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 h-full flex flex-col">
-                    <div className="flex justify-between items-center mb-4 border-b border-white/20 pb-2">
-                        <h3 className="text-white font-semibold">Live Messages</h3>
-                        <button
-                            onClick={refreshMessages}
-                            disabled={isRefreshing}
-                            className="text-white/60 hover:text-white transition-colors p-1"
-                            title="Refresh messages"
-                        >
-                            {isRefreshing ? (
-                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            ) : (
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                            )}
-                        </button>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto space-y-2 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/20">
-                        {messages.map((message) => (
+            {showOverlay && currentUser && (
+                <div className="absolute top-8 left-8 text-white">
+                    {/* <h1 className="text-4xl font-bold mb-2">{displayName}</h1> */}
+                    <div className="pointer-events-auto bg-black/20 backdrop-blur-sm rounded-full px-6 py-3 border border-white/20">
+                        <div className="flex items-center space-x-3">
                             <div
-                                key={message.id}
-                                className={`p-3 rounded-lg text-sm ${isMyMessage(message)
-                                    ? 'bg-blue-500/30 text-blue-100 ml-4'
-                                    : 'bg-white/10 text-white/90 mr-4'
-                                    }`}
-                            >
-                                <div className="flex justify-between items-start mb-1">
-                                    <span className="font-medium text-xs opacity-75">
-                                        {isMyMessage(message) ? 'You' : message.users?.session_nickname || 'Anonymous'}
-                                    </span>
-                                    <span className="text-xs opacity-60">
-                                        {formatTime(message.created_at)}
-                                    </span>
-                                </div>
-                                <div>{message.content}</div>
-                            </div>
-                        ))}
-
-                        {messages.length === 0 && (
-                            <div className="text-center text-white/60 py-8">
-                                No messages yet. Be the first to say something!
-                            </div>
-                        )}
+                                className="w-4 h-4 rounded-full border border-white/30"
+                                style={{ backgroundColor: currentCube?.color }}
+                            />
+                            <span className="text-white font-medium text-sm">
+                                {currentCube?.name}
+                            </span>
+                        </div>
                     </div>
+                    {/* <p className="text-lg opacity-80">Welcome back {currentUser.session_nickname}</p> */}
+                    {/* <p className="text-sm opacity-60">{messages.length} messages in this cube</p> */}
+                    {/* {cubes.length > 1 && (
+                        <p className="text-sm opacity-60 mt-1">
+                            Cube {currentCubeIndex + 1} of {cubes.length}
+                        </p>
+                    )} */}
                 </div>
-            </div> */}
+            )}
 
             {isTransitioning && (
                 <TransitionOverlay
@@ -457,13 +596,13 @@ export default function ThreeDCube({
                         type="text"
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
-                        placeholder={isSending ? "Sending..." : "Add a message"}
-                        disabled={isSending}
+                        placeholder={isSending ? "Sending..." : `Send a message to ${displayName}`}
+                        disabled={isSending || isCubeSwitching}
                         className="w-full py-4 pl-6 pr-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full text-white placeholder-white/60 outline-none focus:ring-2 focus:ring-white/30 focus:border-white/40 transition-all disabled:opacity-50"
                     />
                     <button
                         type="submit"
-                        disabled={!inputText.trim() || isSending}
+                        disabled={!inputText.trim() || isSending || isCubeSwitching}
                         className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-white/20 hover:bg-white/30 disabled:bg-white/10 disabled:cursor-not-allowed text-white p-2 rounded-full transition-colors"
                     >
                         {isSending ? (
@@ -478,7 +617,7 @@ export default function ThreeDCube({
 
                 {/* Instructions */}
                 <p className="text-center text-white/60 text-sm mt-2">
-                    Click the cube to explore nodes
+                    {cubes.length > 1 ? 'Use ← → to switch cubes • Click cube to explore' : 'Click the cube to explore nodes'}
                 </p>
             </div>
         </div>

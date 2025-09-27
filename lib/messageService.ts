@@ -1,15 +1,38 @@
 import { supabase, Message } from './supabase';
 import { getCurrentUser } from './userIdentity';
+import { getDefaultCube } from './cubeService';
 
 // Re-export getCurrentUser for convenience
 export { getCurrentUser } from './userIdentity';
 
-// Send a new message or reply
-export async function sendMessage(content: string, parentMessageId?: string): Promise<Message> {
+// Send a new message or reply to a specific cube
+export async function sendMessage(content: string, parentMessageId?: string, cubeId?: string): Promise<Message> {
     const user = await getCurrentUser();
+
+    // If no cube ID provided, use the default cube
+    let targetCubeId = cubeId;
+    if (!targetCubeId) {
+        if (parentMessageId) {
+            // If replying, get the parent message's cube
+            const { data: parentMessage } = await supabase
+                .from('messages')
+                .select('cube_id')
+                .eq('id', parentMessageId)
+                .single();
+
+            targetCubeId = parentMessage?.cube_id;
+        }
+
+        if (!targetCubeId) {
+            // Fall back to default cube
+            const defaultCube = await getDefaultCube();
+            targetCubeId = defaultCube.id;
+        }
+    }
 
     const messageData: any = {
         user_id: user.id,
+        cube_id: targetCubeId,
         content: content.trim()
     };
 
@@ -26,6 +49,10 @@ export async function sendMessage(content: string, parentMessageId?: string): Pr
       users (
         session_nickname,
         fingerprint_hash
+      ),
+      cubes (
+        name,
+        color
       )
     `)
         .single();
@@ -40,20 +67,31 @@ export async function sendMessage(content: string, parentMessageId?: string): Pr
     return message!;
 }
 
-// Get recent messages
-export async function getRecentMessages(limit: number = 50): Promise<Message[]> {
-    const { data: messages, error } = await supabase
+// Get recent messages for a specific cube
+export async function getRecentMessages(limit: number = 50, cubeId?: string): Promise<Message[]> {
+    let query = supabase
         .from('messages')
         .select(`
       *,
       users (
         session_nickname,
         fingerprint_hash
+      ),
+      cubes (
+        name,
+        color
       )
     `)
         .eq('is_deleted', false)
         .order('created_at', { ascending: false })
         .limit(limit);
+
+    // Filter by cube if specified
+    if (cubeId) {
+        query = query.eq('cube_id', cubeId);
+    }
+
+    const { data: messages, error } = await query;
 
     if (error) {
         throw new Error(`Failed to fetch messages: ${error.message}`);
@@ -62,22 +100,33 @@ export async function getRecentMessages(limit: number = 50): Promise<Message[]> 
     return messages || [];
 }
 
-// Get messages for current user
-export async function getUserMessages(): Promise<Message[]> {
+// Get messages for current user (optionally filtered by cube)
+export async function getUserMessages(cubeId?: string): Promise<Message[]> {
     const user = await getCurrentUser();
 
-    const { data: messages, error } = await supabase
+    let query = supabase
         .from('messages')
         .select(`
       *,
       users (
         session_nickname,
         fingerprint_hash
+      ),
+      cubes (
+        name,
+        color
       )
     `)
         .eq('user_id', user.id)
         .eq('is_deleted', false)
         .order('created_at', { ascending: false });
+
+    // Filter by cube if specified
+    if (cubeId) {
+        query = query.eq('cube_id', cubeId);
+    }
+
+    const { data: messages, error } = await query;
 
     if (error) {
         throw new Error(`Failed to fetch user messages: ${error.message}`);
@@ -95,6 +144,10 @@ export async function getMessageReplies(messageId: string): Promise<Message[]> {
       users (
         session_nickname,
         fingerprint_hash
+      ),
+      cubes (
+        name,
+        color
       )
     `)
         .eq('parent_message_id', messageId)
@@ -108,24 +161,29 @@ export async function getMessageReplies(messageId: string): Promise<Message[]> {
     return replies || [];
 }
 
-// Real-time message subscription
-export function subscribeToMessages(callback: (message: Message) => void) {
-    console.log('Creating message subscription...');
+// Real-time message subscription (optionally filtered by cube)
+export function subscribeToMessages(callback: (message: Message) => void, cubeId?: string) {
+    console.log('Creating message subscription...', cubeId ? `for cube ${cubeId}` : 'for all cubes');
+
+    let filter = 'is_deleted=eq.false';
+    if (cubeId) {
+        filter += `.and(cube_id=eq.${cubeId})`;
+    }
 
     const subscription = supabase
-        .channel('public:messages')
+        .channel(`public:messages${cubeId ? `:${cubeId}` : ''}`)
         .on(
             'postgres_changes',
             {
                 event: 'INSERT',
                 schema: 'public',
                 table: 'messages',
-                filter: 'is_deleted=eq.false'
+                filter: filter
             },
             async (payload) => {
                 console.log('Real-time payload received:', payload);
 
-                // Fetch the complete message with user data
+                // Fetch the complete message with user and cube data
                 const { data: message, error } = await supabase
                     .from('messages')
                     .select(`
@@ -133,6 +191,10 @@ export function subscribeToMessages(callback: (message: Message) => void) {
             users (
               session_nickname,
               fingerprint_hash
+            ),
+            cubes (
+              name,
+              color
             )
           `)
                     .eq('id', payload.new.id)
@@ -192,19 +254,37 @@ export async function updateNickname(nickname: string): Promise<void> {
     }
 }
 
-// Get online users count (active in last 5 minutes)
-export async function getOnlineUsersCount(): Promise<number> {
+// Get online users count (active in last 5 minutes) - optionally for a specific cube
+export async function getOnlineUsersCount(cubeId?: string): Promise<number> {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
-    const { count, error } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .gte('last_seen', fiveMinutesAgo);
+    if (cubeId) {
+        // Get users who have posted in this cube recently
+        const { count, error } = await supabase
+            .from('messages')
+            .select('user_id', { count: 'exact', head: true })
+            .eq('cube_id', cubeId)
+            .gte('created_at', fiveMinutesAgo)
+            .eq('is_deleted', false);
 
-    if (error) {
-        console.warn('Failed to get online users count:', error);
-        return 0;
+        if (error) {
+            console.warn('Failed to get cube-specific online users count:', error);
+            return 0;
+        }
+
+        return count || 0;
+    } else {
+        // Get all recently active users
+        const { count, error } = await supabase
+            .from('users')
+            .select('*', { count: 'exact', head: true })
+            .gte('last_seen', fiveMinutesAgo);
+
+        if (error) {
+            console.warn('Failed to get online users count:', error);
+            return 0;
+        }
+
+        return count || 0;
     }
-
-    return count || 0;
 }

@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Replace with your Supabase project URL and anon key
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -13,7 +12,6 @@ if (!supabaseUrl || !supabaseKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Database types
 export interface User {
     id: string;
     fingerprint_hash: string;
@@ -24,9 +22,22 @@ export interface User {
     session_nickname?: string;
 }
 
+export interface TheCube {
+    id: string;
+    name: string;
+    description?: string;
+    color: string;
+    opacity: number;
+    position_index: number;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
 export interface Message {
     id: string;
     user_id: string;
+    cube_id: string;
     content: string;
     created_at: string;
     is_deleted: boolean;
@@ -35,5 +46,9 @@ export interface Message {
     users?: {
         session_nickname?: string;
         fingerprint_hash: string;
+    };
+    cubes?: {
+        name: string;
+        color: string;
     };
 }
