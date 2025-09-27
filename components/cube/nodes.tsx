@@ -222,29 +222,49 @@ export default function Nodes({
 
     // Generate positions with reply positioning logic
     const generateNodePosition = (index: number, message?: Message): [number, number, number] => {
-        // Use the message index as seed for consistent positioning
-        const seed = index * 12345;
-        const random = (offset: number) => {
-            const x = Math.sin(seed + offset) * 10000;
-            return (x - Math.floor(x)) * 2 - 1; // Range: -1 to 1
-        };
-
         // If this is a reply, position it near the parent
         if (message?.parent_message_id) {
-            const parentIndex = messages.findIndex(m => m.id === message.parent_message_id);
-            if (parentIndex !== -1) {
-                const parentPos = generateParentPosition(parentIndex);
-                // Position replies in a small orbit around the parent
-                const angle = (seed * 0.1) % (Math.PI * 2);
-                const distance = 1.5; // Distance from parent
-                return [
-                    parentPos[0] + Math.cos(angle) * distance,
-                    parentPos[1] + Math.sin(angle) * distance * 0.5,
-                    parentPos[2] + Math.sin(angle * 2) * distance * 0.5
-                ];
+            // Find the root parent by traversing up the chain
+            let currentMessage = message;
+            let depth = 0;
+            const maxDepth = 10; // Prevent infinite loops
+
+            while (currentMessage?.parent_message_id && depth < maxDepth) {
+                const parentMsg = messages.find(m => m.id === currentMessage.parent_message_id);
+                if (!parentMsg) break;
+                currentMessage = parentMsg;
+                depth++;
             }
+
+            // Now currentMessage is the root parent (top-level message)
+            const rootIndex = messages.findIndex(m => m.id === currentMessage.id);
+            const rootPos = generateParentPosition(rootIndex);
+
+            // Get all replies to this specific parent, sorted by creation time
+            const siblingReplies = messages
+                .filter(m => m.parent_message_id === message.parent_message_id)
+                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+            const replyIndex = siblingReplies.findIndex(m => m.id === message.id);
+
+            console.log(`Reply positioning - Parent: ${message.parent_message_id?.substring(0, 8)}, Reply: ${message.id.substring(0, 8)}, Index: ${replyIndex}, Total: ${siblingReplies.length}, Depth: ${depth}`);
+
+            // Position based on depth from root and sibling index
+            const angle = (replyIndex / Math.max(siblingReplies.length, 1)) * Math.PI * 2;
+            const distance = 0.6 + (depth * 0.3); // Gradually move outward with depth
+
+            const replyPos: [number, number, number] = [
+                rootPos[0] + Math.cos(angle) * distance,
+                rootPos[1] + Math.sin(angle) * distance * 0.5,
+                rootPos[2] + Math.cos(angle + Math.PI / 4) * distance * 0.3
+            ];
+
+            console.log(`Root pos:`, rootPos, `Reply pos:`, replyPos, `Distance: ${distance}`);
+
+            return replyPos;
         }
 
+        // This is a top-level message (no parent)
         return generateParentPosition(index);
     };
 
