@@ -508,6 +508,7 @@ export default function ThreeDCube({
                 onExit={handleExitInsideView}
                 isTransitioning={isTransitioning}
                 onStartTransition={handleStartExitTransition}
+                currentCube={currentCube}
             />
         );
     }
@@ -574,12 +575,12 @@ export default function ThreeDCube({
                         </div>
                     </div>
                     {/* <p className="text-lg opacity-80">Welcome back {currentUser.session_nickname}</p> */}
-                    {/* <p className="text-sm opacity-60">{messages.length} messages in this cube</p> */}
-                    {/* {cubes.length > 1 && (
+                    <p className="text-sm opacity-60">{messages.length} messages in this cube</p>
+                    {cubes.length > 1 && (
                         <p className="text-sm opacity-60 mt-1">
                             Cube {currentCubeIndex + 1} of {cubes.length}
                         </p>
-                    )} */}
+                    )}
                 </div>
             )}
 

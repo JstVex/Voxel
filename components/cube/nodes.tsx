@@ -4,7 +4,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
-import { Message, User } from '../../lib/supabase';
+import { Message, User, TheCube } from '../../lib/supabase';
 import { sendMessage } from '../../lib/messageService';
 
 function CameraZoomController({
@@ -71,6 +71,7 @@ function CameraZoomController({
     return null;
 }
 
+
 // Easing function for smooth animation
 function easeInOutCubic(t: number): number {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -100,6 +101,7 @@ function ConnectionLine({ start, end }: ConnectionLineProps) {
 interface NodesProps {
     messages: Message[];
     currentUser: any;
+    currentCube?: TheCube | null;
     onExit: () => void;
     isTransitioning?: boolean;
     onStartTransition?: () => void;
@@ -183,6 +185,7 @@ function MessageNode({
 export default function Nodes({
     messages,
     currentUser,
+    currentCube,
     onExit,
     isTransitioning = false,
     onStartTransition
@@ -334,7 +337,8 @@ export default function Nodes({
 
         setIsSending(true);
         try {
-            await sendMessage(replyText.trim(), focusedMessage.id);
+            // Pass the focused message's cube_id to ensure reply goes to same cube
+            await sendMessage(replyText.trim(), focusedMessage.id, focusedMessage.cube_id);
             setReplyText('');
             console.log('Reply sent successfully');
             // Keep the focused state so user can see the new reply appear
@@ -425,7 +429,7 @@ export default function Nodes({
                     </div>
                 ) : (
                     <div>
-                        <p className="text-lg opacity-90">Exploring messages in the base cube</p>
+                        <p className="text-lg opacity-90">Exploring messages in {currentCube?.name || 'the cube'}</p>
                         <p className="text-sm opacity-60 mt-2">
                             Hover nodes to preview • Click nodes for details
                         </p>
@@ -484,9 +488,6 @@ export default function Nodes({
             {/* Reply Input - only appears when focused on a node */}
             {focusedMessage && (
                 <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 w-full max-w-md px-4">
-                    {/* Reply context info */}
-
-
                     {/* Reply form - exactly like cube.tsx */}
                     <form onSubmit={handleReplySubmit} className="relative">
                         <input
