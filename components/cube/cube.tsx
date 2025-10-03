@@ -184,8 +184,8 @@ export default function ThreeDCube() {
                 // Get or create user in database
                 const user = await getOrCreateUser(
                     {
-                        id: session.user?.email || '',
-                        login: session.user?.name || '',
+                        id: session.user?.id,
+                        login: session.user?.login || session.user?.name || '',
                         avatar_url: session.user?.image || ''
                     },
                     session.accessToken || ''

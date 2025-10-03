@@ -2,29 +2,64 @@ import { supabase, TheCube, User } from './supabase';
 
 // Get or create user in database
 export async function getOrCreateUser(githubUser: any, accessToken: string): Promise<User> {
-    const { data: existingUser, error: fetchError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('github_id', githubUser.id.toString())
-        .single();
+    console.log('GitHub user data:', githubUser);
 
-    if (existingUser) {
-        // Update last seen
-        await supabase
-            .from('users')
-            .update({ last_seen: new Date().toISOString() })
-            .eq('id', existingUser.id);
+    const githubId = githubUser.id;
+    const githubLogin = githubUser.login;
 
-        return existingUser;
+    if (!githubId && !githubLogin) {
+        throw new Error('No valid identifier found for GitHub user. Please sign out and sign back in.');
     }
 
-    // Create new user
+    if (githubId) {
+        const { data: existingUser, error: fetchError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('github_id', githubId.toString())
+            .single();
+
+        if (existingUser) {
+            await supabase
+                .from('users')
+                .update({ last_seen: new Date().toISOString() })
+                .eq('id', existingUser.id);
+
+            return existingUser;
+        }
+    }
+
+    if (githubLogin) {
+        const { data: existingUserByLogin, error: fetchError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('github_username', githubLogin)
+            .single();
+
+        if (existingUserByLogin) {
+            const updateData: any = { last_seen: new Date().toISOString() };
+            if (githubId) {
+                updateData.github_id = githubId.toString();
+            }
+
+            await supabase
+                .from('users')
+                .update(updateData)
+                .eq('id', existingUserByLogin.id);
+
+            return existingUserByLogin;
+        }
+    }
+
+    if (!githubId || !githubLogin) {
+        throw new Error('Cannot create user without GitHub ID and username');
+    }
+
     const { data: newUser, error: createError } = await supabase
         .from('users')
         .insert({
-            github_id: githubUser.id.toString(),
-            github_username: githubUser.login,
-            github_avatar_url: githubUser.avatar_url,
+            github_id: githubId.toString(),
+            github_username: githubLogin,
+            github_avatar_url: githubUser.avatar_url || githubUser.image,
             access_token: accessToken,
         })
         .select()
