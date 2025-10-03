@@ -1,10 +1,33 @@
 'use client';
 
-import { useSession } from 'next-auth/react';
+import { useSession, signOut } from 'next-auth/react';
 import { useEffect, useState } from 'react';
 import { fetchUserRepositories } from '@/lib/githubService';
 import { getOrCreateUser, saveRepositoriesAsCubes } from '@/lib/cubeService';
 import { useRouter } from 'next/navigation';
+
+function UserInfo({ session }: { session: any }) {
+    return (
+        <div className="absolute top-8 right-8 flex items-center gap-4 z-20">
+            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2 border border-white/20">
+                {session.user?.image && (
+                    <img
+                        src={session.user.image}
+                        alt="Profile"
+                        className="w-8 h-8 rounded-full"
+                    />
+                )}
+                <span className="text-white text-sm">{session.user?.name}</span>
+            </div>
+            <button
+                onClick={() => signOut({ callbackUrl: '/' })}
+                className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-full transition-colors backdrop-blur-sm border border-white/20 text-sm"
+            >
+                Sign Out
+            </button>
+        </div>
+    );
+}
 
 export default function RepositoriesPage() {
     const { data: session } = useSession();
@@ -81,6 +104,9 @@ export default function RepositoriesPage() {
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+
+            {session && <UserInfo session={session} />}
+
             <div className="max-w-6xl mx-auto">
                 <div className="mb-8">
                     <p className="text-white/60">Select repositories to visualize as 3D cubes</p>
