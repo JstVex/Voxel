@@ -4,51 +4,49 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-    console.error('Missing Supabase environment variables:');
-    console.error('NEXT_PUBLIC_SUPABASE_URL:', supabaseUrl ? 'Present' : 'Missing');
-    console.error('NEXT_PUBLIC_SUPABASE_ANON_KEY:', supabaseKey ? 'Present' : 'Missing');
-    throw new Error('Missing Supabase environment variables. Please check your .env.local file.');
+    throw new Error('Missing Supabase environment variables');
 }
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Database types for GitHub project
 export interface User {
     id: string;
-    fingerprint_hash: string;
-    backup_identifiers: Record<string, any>;
+    github_id: string;
+    github_username: string;
+    github_avatar_url?: string;
+    access_token?: string;
     created_at: string;
     last_seen: string;
-    message_count: number;
-    session_nickname?: string;
 }
 
 export interface TheCube {
     id: string;
-    name: string;
+    user_id: string;
+    github_repo_id: string;
+    github_repo_name: string;
+    github_repo_full_name: string;
+    github_owner: string;
+    repo_url: string;
     description?: string;
+    language?: string;
     color: string;
-    opacity: number;
     position_index: number;
     is_active: boolean;
+    last_synced?: string;
     created_at: string;
     updated_at: string;
 }
 
-export interface Message {
+export interface Commit {
     id: string;
-    user_id: string;
     cube_id: string;
-    content: string;
+    commit_hash: string;
+    commit_message: string;
+    author_name?: string;
+    author_email?: string;
+    author_avatar_url?: string;
+    committed_at: string;
+    parent_commits?: string[];
     created_at: string;
-    is_deleted: boolean;
-    parent_message_id?: string | null;
-    reply_count: number;
-    users?: {
-        session_nickname?: string;
-        fingerprint_hash: string;
-    };
-    cubes?: {
-        name: string;
-        color: string;
-    };
 }
